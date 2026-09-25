@@ -25,14 +25,14 @@ function getStorage() {
 }
 
 /**
- * Gets the preferred temperature unit ('C' or 'F')
+ * Gets the preferred temperature unit ('C' or 'F') - Defaults to 'F'
  * @returns {'C'|'F'}
  */
 export function getUnitPreference() {
   const storage = getStorage();
-  if (!storage) return 'C';
+  if (!storage) return 'F';
   const unit = storage.getItem(STORAGE_KEYS.UNIT);
-  return unit === 'F' ? 'F' : 'C';
+  return unit === 'C' ? 'C' : 'F';
 }
 
 /**
@@ -42,7 +42,7 @@ export function getUnitPreference() {
 export function setUnitPreference(unit) {
   const storage = getStorage();
   if (!storage) return;
-  const validUnit = unit === 'F' ? 'F' : 'C';
+  const validUnit = unit === 'C' ? 'C' : 'F';
   storage.setItem(STORAGE_KEYS.UNIT, validUnit);
 }
 
@@ -68,7 +68,7 @@ export function getSearchHistory() {
 
 /**
  * Adds a location to search history (deduplicating and capping at MAX_HISTORY_ITEMS)
- * @param {{ name: string, country?: string, admin1?: string, latitude: number, longitude: number }} location
+ * @param {{ name: string, country?: string, admin1?: string, latitude: number, longitude: number }} location 
  * @returns {Array<{ name: string, country?: string, admin1?: string, latitude: number, longitude: number }>}
  */
 export function addSearchHistory(location) {

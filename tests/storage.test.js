@@ -14,8 +14,8 @@ describe('Storage Module', () => {
   });
 
   describe('Unit preference', () => {
-    it('defaults to Celsius if no preference stored', () => {
-      expect(getUnitPreference()).toBe('C');
+    it('defaults to Fahrenheit if no preference stored', () => {
+      expect(getUnitPreference()).toBe('F');
     });
 
     it('stores and retrieves Fahrenheit correctly', () => {
@@ -27,11 +27,12 @@ describe('Storage Module', () => {
     it('stores and retrieves Celsius correctly', () => {
       setUnitPreference('C');
       expect(getUnitPreference()).toBe('C');
+      expect(localStorage.getItem(STORAGE_KEYS.UNIT)).toBe('C');
     });
 
-    it('defaults invalid values to Celsius', () => {
+    it('defaults invalid values to Fahrenheit', () => {
       setUnitPreference('INVALID');
-      expect(getUnitPreference()).toBe('C');
+      expect(getUnitPreference()).toBe('F');
     });
   });
 

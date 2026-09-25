@@ -1,5 +1,5 @@
 /**
- * Temperature and unit conversion utilities
+ * Temperature, wind, pressure, and unit conversion utilities
  */
 
 /**
@@ -29,7 +29,7 @@ export function fahrenheitToCelsius(fahrenheit) {
  * @param {boolean} includeUnit - Whether to include the unit symbol
  * @returns {string} Formatted temperature string
  */
-export function formatTemperature(tempInCelsius, unit = 'C', includeUnit = true) {
+export function formatTemperature(tempInCelsius, unit = 'F', includeUnit = true) {
   if (typeof tempInCelsius !== 'number' || isNaN(tempInCelsius)) {
     return includeUnit ? `--°${unit}` : '--';
   }
@@ -55,7 +55,7 @@ export function kmhToMph(kmh) {
  * @param {'C'|'F'} unit - Unit system ('C' for metric, 'F' for imperial)
  * @returns {string} Formatted wind speed
  */
-export function formatWindSpeed(speedKmh, unit = 'C') {
+export function formatWindSpeed(speedKmh, unit = 'F') {
   if (typeof speedKmh !== 'number' || isNaN(speedKmh)) return '--';
   if (unit === 'F') {
     const mph = Math.round(kmhToMph(speedKmh));
@@ -63,6 +63,51 @@ export function formatWindSpeed(speedKmh, unit = 'C') {
   }
   const kmh = Math.round(speedKmh);
   return `${kmh} km/h`;
+}
+
+/**
+ * Converts wind direction degrees to 16-point compass letters
+ * @param {number} degrees 
+ * @returns {string} e.g. "N", "NE", "SSW", "NW"
+ */
+export function getWindCompassDirection(degrees) {
+  if (typeof degrees !== 'number' || isNaN(degrees)) return '';
+  const directions = [
+    'N', 'NNE', 'NE', 'ENE',
+    'E', 'ESE', 'SE', 'SSE',
+    'S', 'SSW', 'SW', 'WSW',
+    'W', 'WNW', 'NW', 'NNW'
+  ];
+  const normalized = ((degrees % 360) + 360) % 360;
+  const index = Math.round(normalized / 22.5) % 16;
+  return directions[index];
+}
+
+/**
+ * Formats wind direction with both degrees and compass direction
+ * @param {number} degrees 
+ * @returns {string} e.g. "180° S"
+ */
+export function formatWindDirection(degrees) {
+  if (typeof degrees !== 'number' || isNaN(degrees)) return '--';
+  const compass = getWindCompassDirection(degrees);
+  return `${Math.round(degrees)}° ${compass}`;
+}
+
+/**
+ * Formats barometric surface pressure
+ * @param {number} pressureHpa - Pressure in hPa / mbar
+ * @param {'C'|'F'} unit - 'C' for hPa, 'F' for inHg
+ * @returns {string} Formatted pressure with unit
+ */
+export function formatPressure(pressureHpa, unit = 'F') {
+  if (typeof pressureHpa !== 'number' || isNaN(pressureHpa)) return '--';
+  if (unit === 'F') {
+    // 1 hPa = 0.029529983071445 inHg
+    const inHg = (pressureHpa * 0.02953).toFixed(2);
+    return `${inHg} inHg`;
+  }
+  return `${Math.round(pressureHpa)} hPa`;
 }
 
 /**

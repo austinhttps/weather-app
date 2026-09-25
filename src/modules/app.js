@@ -2,38 +2,84 @@
  * Main Application Orchestrator
  */
 
-import { searchLocation, reverseGeocode, fetchWeatherData, WeatherApiError } from './api.js';
+import { searchLocation, reverseGeocode, fetchWeatherData } from './api.js';
 import { getUnitPreference, setUnitPreference, getSearchHistory, addSearchHistory } from './storage.js';
 import { WeatherUI } from './ui.js';
 
 export class WeatherApp {
   constructor() {
     this.ui = new WeatherUI();
-    this.currentUnit = getUnitPreference();
+    this.currentUnit = getUnitPreference(); // Defaults to 'F'
     this.currentLocation = null;
     this.currentWeatherData = null;
+    this.selectedDayIndex = 0; // 0 = Today
     this.debounceTimer = null;
   }
 
   /**
-   * Initialize app events and load default/last location
+   * Initialize app events and request user's location on startup
    */
   async init() {
     this.setupEventListeners();
     this.ui.updateUnitToggle(this.currentUnit);
     this.renderHistory();
 
-    // Check last searched location or default to New York
+    // Priority 1 on startup: Attempt user's geolocation
+    if (navigator.geolocation) {
+      this.ui.showLoading();
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          try {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            const locationInfo = await reverseGeocode(lat, lon);
+            
+            const userLocation = {
+              name: locationInfo.name || 'Current Location',
+              country: locationInfo.country,
+              admin1: locationInfo.admin1,
+              latitude: lat,
+              longitude: lon
+            };
+
+            if (this.ui.searchInput) {
+              this.ui.searchInput.value = userLocation.name;
+            }
+
+            await this.loadWeatherForLocation(userLocation, true);
+          } catch {
+            await this.loadFallbackLocation();
+          }
+        },
+        async () => {
+          // Geolocation was denied or unavailable -> gracefully load fallback
+          await this.loadFallbackLocation();
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 7000,
+          maximumAge: 60000
+        }
+      );
+    } else {
+      await this.loadFallbackLocation();
+    }
+  }
+
+  /**
+   * Loads search history or default city when geolocation is denied or unavailable
+   */
+  async loadFallbackLocation() {
     const history = getSearchHistory();
     if (history.length > 0) {
       await this.loadWeatherForLocation(history[0], false);
     } else {
       await this.loadWeatherForLocation({
-        name: 'New York',
+        name: 'Austin',
         country: 'United States',
-        admin1: 'New York',
-        latitude: 40.7128,
-        longitude: -74.0060
+        admin1: 'Texas',
+        latitude: 30.2672,
+        longitude: -97.7431
       }, false);
     }
   }
@@ -67,6 +113,7 @@ export class WeatherApp {
           const results = await searchLocation(query, 5);
           this.ui.renderSuggestions(results, async (selectedLocation) => {
             if (this.ui.searchInput) this.ui.searchInput.value = selectedLocation.name;
+            this.selectedDayIndex = 0;
             await this.loadWeatherForLocation(selectedLocation, true);
           });
         } catch {
@@ -112,6 +159,7 @@ export class WeatherApp {
       }
 
       const location = results[0];
+      this.selectedDayIndex = 0;
       await this.loadWeatherForLocation(location, true);
     } catch (err) {
       this.ui.showError(err.message || 'Error finding location.');
@@ -119,7 +167,7 @@ export class WeatherApp {
   }
 
   /**
-   * Handles browser navigator.geolocation
+   * Handles manual click on "Use My Location"
    */
   handleGeolocation() {
     if (!navigator.geolocation) {
@@ -148,6 +196,7 @@ export class WeatherApp {
             this.ui.searchInput.value = location.name;
           }
 
+          this.selectedDayIndex = 0;
           await this.loadWeatherForLocation(location, true);
         } catch (err) {
           this.ui.showError(err.message || 'Failed to resolve your location.');
@@ -157,13 +206,13 @@ export class WeatherApp {
         let message = 'Unable to retrieve your location.';
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            message = 'Location access denied. Please allow location permissions or search for your city.';
+            message = 'Location access denied. Please allow location permissions in your browser settings.';
             break;
           case error.POSITION_UNAVAILABLE:
             message = 'Location information is currently unavailable.';
             break;
           case error.TIMEOUT:
-            message = 'Request to get user location timed out. Please try searching for your city.';
+            message = 'Request to get location timed out. Please try searching for your city.';
             break;
         }
         this.ui.showError(message);
@@ -193,9 +242,27 @@ export class WeatherApp {
         this.renderHistory();
       }
 
-      this.ui.renderWeather(this.currentLocation, this.currentWeatherData, this.currentUnit);
+      this.renderCurrentView();
     } catch (err) {
       this.ui.showError(err.message || 'Failed to load weather data. Please try again.');
+    }
+  }
+
+  /**
+   * Helper to render current weather view with day select callback
+   */
+  renderCurrentView() {
+    if (this.currentLocation && this.currentWeatherData) {
+      this.ui.renderWeather(
+        this.currentLocation,
+        this.currentWeatherData,
+        this.currentUnit,
+        this.selectedDayIndex,
+        (newDayIndex) => {
+          this.selectedDayIndex = newDayIndex;
+          this.renderCurrentView();
+        }
+      );
     }
   }
 
@@ -206,6 +273,7 @@ export class WeatherApp {
     const history = getSearchHistory();
     this.ui.renderSearchHistory(history, async (item) => {
       if (this.ui.searchInput) this.ui.searchInput.value = item.name;
+      this.selectedDayIndex = 0;
       await this.loadWeatherForLocation(item, true);
     });
   }
@@ -214,13 +282,13 @@ export class WeatherApp {
    * Toggle between Celsius and Fahrenheit
    */
   toggleUnit() {
-    this.currentUnit = this.currentUnit === 'C' ? 'F' : 'C';
+    this.currentUnit = this.currentUnit === 'F' ? 'C' : 'F';
     setUnitPreference(this.currentUnit);
     this.ui.updateUnitToggle(this.currentUnit);
 
-    // If we already have data loaded, re-render immediately without network overhead
+    // Instant re-render with new unit
     if (this.currentLocation && this.currentWeatherData) {
-      this.ui.renderWeather(this.currentLocation, this.currentWeatherData, this.currentUnit);
+      this.renderCurrentView();
     }
   }
 }

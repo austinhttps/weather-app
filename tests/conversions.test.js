@@ -5,6 +5,9 @@ import {
   formatTemperature,
   kmhToMph,
   formatWindSpeed,
+  getWindCompassDirection,
+  formatWindDirection,
+  formatPressure,
   formatDayOfWeek,
   formatShortDate
 } from '../src/modules/conversions.js';
@@ -64,6 +67,10 @@ describe('Unit Conversions', () => {
       expect(formatTemperature(22, 'F', true)).toBe('72°F');
     });
 
+    it('defaults to Fahrenheit when unit omitted', () => {
+      expect(formatTemperature(20)).toBe('68°F');
+    });
+
     it('formats without unit symbol when requested', () => {
       expect(formatTemperature(22.4, 'C', false)).toBe('22°');
       expect(formatTemperature(22, 'F', false)).toBe('72°');
@@ -76,7 +83,7 @@ describe('Unit Conversions', () => {
     });
   });
 
-  describe('kmhToMph and formatWindSpeed', () => {
+  describe('Wind and Compass formatting', () => {
     it('converts km/h to mph correctly', () => {
       expect(kmhToMph(10)).toBe(6.2);
       expect(kmhToMph(0)).toBe(0);
@@ -88,9 +95,36 @@ describe('Unit Conversions', () => {
       expect(formatWindSpeed(15, 'F')).toBe('9 mph');
     });
 
-    it('handles invalid wind speeds', () => {
-      expect(formatWindSpeed(NaN, 'C')).toBe('--');
-      expect(formatWindSpeed(null, 'F')).toBe('--');
+    it('calculates 16-point compass directions from degrees', () => {
+      expect(getWindCompassDirection(0)).toBe('N');
+      expect(getWindCompassDirection(360)).toBe('N');
+      expect(getWindCompassDirection(90)).toBe('E');
+      expect(getWindCompassDirection(180)).toBe('S');
+      expect(getWindCompassDirection(270)).toBe('W');
+      expect(getWindCompassDirection(225)).toBe('SW');
+      expect(getWindCompassDirection(45)).toBe('NE');
+    });
+
+    it('formats wind direction with degrees and lettered direction', () => {
+      expect(formatWindDirection(180)).toBe('180° S');
+      expect(formatWindDirection(225)).toBe('225° SW');
+      expect(formatWindDirection(NaN)).toBe('--');
+    });
+  });
+
+  describe('Barometric Pressure formatting', () => {
+    it('formats pressure in hPa when unit is C', () => {
+      expect(formatPressure(1013.25, 'C')).toBe('1013 hPa');
+    });
+
+    it('formats pressure in inHg when unit is F', () => {
+      // 1013.25 * 0.02953 = 29.92 inHg
+      expect(formatPressure(1013.25, 'F')).toBe('29.92 inHg');
+    });
+
+    it('handles invalid pressure gracefully', () => {
+      expect(formatPressure(NaN, 'F')).toBe('--');
+      expect(formatPressure(null, 'C')).toBe('--');
     });
   });
 
