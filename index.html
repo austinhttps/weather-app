@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Lightweight, fast, and responsive weather web application using Open-Meteo API.">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2338bdf8' stroke-width='2'><circle cx='12' cy='12' r='4'/><path d='M12 2v2'/><path d='M12 20v2'/><path d='m4.93 4.93 1.41 1.41'/><path d='m17.66 17.66 1.41 1.41'/><path d='M2 12h2'/><path d='M20 12h2'/><path d='m6.34 17.66-1.41 1.41'/><path d='m19.07 4.93-1.41 1.41'/></svg>">
+  <title>Atmosphere - Weather App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body class="theme-clear-day">
+  <div id="app" class="app-wrapper">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <svg class="brand-logo" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+          <path d="M12 2v2" stroke="var(--primary-glow)"/>
+          <path d="m4.93 4.93 1.41 1.41" stroke="var(--primary-glow)"/>
+        </svg>
+        <span class="brand-title">Atmosphere</span>
+      </div>
+
+      <!-- Unit Toggle Button -->
+      <div class="header-controls">
+        <button id="unit-toggle-btn" class="unit-toggle" type="button" aria-label="Toggle Celsius and Fahrenheit">
+          <span id="unit-c" class="unit-pill active">°C</span>
+          <span id="unit-f" class="unit-pill">°F</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Search Section -->
+    <section class="search-section" aria-label="Search city">
+      <div class="search-box-wrapper">
+        <form id="search-form" class="search-form" role="search">
+          <div class="input-container">
+            <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+            </svg>
+            <input 
+              type="text" 
+              id="search-input" 
+              class="search-input" 
+              placeholder="Search city or location (e.g. Tokyo, Paris, Austin)..." 
+              autocomplete="off"
+              spellcheck="false"
+              required
+            />
+            <button 
+              type="button" 
+              id="location-btn" 
+              class="location-btn" 
+              title="Use my current location"
+              aria-label="Use my current location"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="22" x2="18" y1="12" y2="12"/><line x1="6" x2="2" y1="12" y2="12"/><line x1="12" x2="12" y1="6" y2="2"/><line x1="12" x2="12" y1="22" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </form>
+
+        <!-- Autocomplete Suggestions List -->
+        <ul id="search-suggestions" class="suggestions-list hidden" role="listbox"></ul>
+      </div>
+
+      <!-- Recent Searches Quick Tags -->
+      <div class="history-wrapper hidden">
+        <span class="history-label">Recent:</span>
+        <div id="search-history" class="history-chips"></div>
+      </div>
+    </section>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner hidden" role="alert">
+      <div class="error-content">
+        <svg class="error-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>
+        </svg>
+        <span id="error-message" class="error-text"></span>
+      </div>
+      <button id="error-dismiss" class="error-dismiss-btn" aria-label="Dismiss error">✕</button>
+    </div>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- Loading Skeleton Indicator -->
+      <div id="loading-state" class="loading-state hidden" aria-live="polite">
+        <div class="skeleton-card hero-skeleton">
+          <div class="skeleton-line title-skeleton"></div>
+          <div class="skeleton-line temp-skeleton"></div>
+          <div class="skeleton-grid">
+            <div class="skeleton-box"></div>
+            <div class="skeleton-box"></div>
+            <div class="skeleton-box"></div>
+            <div class="skeleton-box"></div>
+          </div>
+        </div>
+        <div class="skeleton-card forecast-skeleton">
+          <div class="skeleton-line title-skeleton" style="width: 140px;"></div>
+          <div class="skeleton-forecast-grid">
+            <div class="skeleton-box day-box"></div>
+            <div class="skeleton-box day-box"></div>
+            <div class="skeleton-box day-box"></div>
+            <div class="skeleton-box day-box"></div>
+            <div class="skeleton-box day-box"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Weather Content Container (rendered dynamically) -->
+      <div id="weather-content" class="weather-content"></div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Powered by <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo API</a> • Real-time Weather Forecast</p>
+    </footer>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
