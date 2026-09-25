@@ -1,5 +1,5 @@
 /**
- * Temperature, wind, pressure, and unit conversion utilities
+ * Temperature, wind, pressure, UV, and unit conversion utilities
  */
 
 /**
@@ -108,6 +108,66 @@ export function formatPressure(pressureHpa, unit = 'F') {
     return `${inHg} inHg`;
   }
   return `${Math.round(pressureHpa)} hPa`;
+}
+
+/**
+ * Returns UV index risk level category description
+ * @param {number} uv 
+ * @returns {{ label: string, color: string }}
+ */
+export function getUvRiskLevel(uv) {
+  if (typeof uv !== 'number' || isNaN(uv) || uv < 0) return { label: 'Low', color: '#4ade80' };
+  if (uv < 3) return { label: 'Low', color: '#4ade80' };
+  if (uv < 6) return { label: 'Moderate', color: '#facc15' };
+  if (uv < 8) return { label: 'High', color: '#fb923c' };
+  if (uv < 11) return { label: 'Very High', color: '#f87171' };
+  return { label: 'Extreme', color: '#c084fc' };
+}
+
+/**
+ * Calculates High, Low (daytime), and Median UV metrics from an array of hourly UV values
+ * @param {number[]} uvList 
+ * @param {number} [fallbackMax=0]
+ * @returns {{ high: number, low: number, median: number, label: string }}
+ */
+export function calculateUvStats(uvList, fallbackMax = 0) {
+  if (!Array.isArray(uvList) || uvList.length === 0) {
+    const high = Math.round(fallbackMax * 10) / 10;
+    return {
+      high,
+      low: 0,
+      median: Math.round((high / 2) * 10) / 10,
+      label: getUvRiskLevel(high).label
+    };
+  }
+
+  const valid = uvList.filter(v => typeof v === 'number' && !isNaN(v));
+  if (valid.length === 0) {
+    const high = Math.round(fallbackMax * 10) / 10;
+    return { high, low: 0, median: 0, label: getUvRiskLevel(high).label };
+  }
+
+  const high = Math.max(...valid, fallbackMax);
+  // Daytime UV values (> 0)
+  const daytimeUv = valid.filter(v => v > 0.2);
+  const low = daytimeUv.length > 0 ? Math.min(...daytimeUv) : 0;
+  
+  // Median calculation
+  let median = 0;
+  if (daytimeUv.length > 0) {
+    const sorted = [...daytimeUv].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  } else {
+    median = high > 0 ? high / 2 : 0;
+  }
+
+  return {
+    high: Math.round(high * 10) / 10,
+    low: Math.round(low * 10) / 10,
+    median: Math.round(median * 10) / 10,
+    label: getUvRiskLevel(high).label
+  };
 }
 
 /**

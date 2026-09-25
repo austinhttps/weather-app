@@ -2,6 +2,8 @@
  * API service for Open-Meteo Geocoding and Weather data
  */
 
+import { calculateUvStats } from './conversions.js';
+
 const GEOCODING_BASE_URL = 'https://geocoding-api.open-meteo.com/v1/search';
 const WEATHER_BASE_URL = 'https://api.open-meteo.com/v1/forecast';
 const BIGDATACLOUD_URL = 'https://api.bigdatacloud.net/data/reverse-geocode-client';
@@ -16,6 +18,36 @@ export class WeatherApiError extends Error {
     this.name = 'WeatherApiError';
     this.type = type;
   }
+}
+
+/**
+ * Clean and filter township/station artifacts from reverse geocoding
+ * @param {string} name 
+ * @param {string} [fallbackTown] 
+ * @param {string} [fallbackCounty] 
+ * @returns {string}
+ */
+export function cleanLocationName(name, fallbackTown = '', fallbackCounty = '') {
+  if (!name) return fallbackTown || fallbackCounty || 'Current Location';
+  
+  // Detect township / weather station / survey division artifacts
+  const isArtifact = /\b(township|station|precinct|district|ward|unincorporated|cadastral)\b/i.test(name);
+  if (isArtifact) {
+    if (fallbackTown && !/\b(township|station|precinct)\b/i.test(fallbackTown)) {
+      return fallbackTown;
+    }
+    if (fallbackCounty && !/\b(township|station)\b/i.test(fallbackCounty)) {
+      return fallbackCounty;
+    }
+    // Clean string directly (e.g. "Township 3-Boone Station" -> "Boone")
+    const cleaned = name
+      .replace(/township\s*\d*[-,\s]*/gi, '')
+      .replace(/\s*station\b/gi, '')
+      .trim();
+    if (cleaned.length > 2) return cleaned;
+    return fallbackCounty || 'Local Area';
+  }
+  return name;
 }
 
 /**
@@ -58,46 +90,54 @@ export async function searchLocation(query, count = 5) {
 }
 
 /**
- * Reverse geocodes latitude and longitude to a human-readable city/region name
+ * Reverse geocodes latitude and longitude to a genuine human-readable town/city name
  * @param {number} latitude 
  * @param {number} longitude 
  * @returns {Promise<{ name: string, country: string, admin1: string }>}
  */
 export async function reverseGeocode(latitude, longitude) {
-  // 1. First attempt with BigDataCloud (fast, client-side friendly)
+  // 1. Nominatim lookup with address details (prioritizing incorporated city/town/village)
   try {
-    const bdcUrl = `${BIGDATACLOUD_URL}?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`;
-    const response = await fetch(bdcUrl);
-    if (response.ok) {
-      const data = await response.json();
-      const cityName = data.city || data.locality || data.principalSubdivision || '';
-      if (cityName) {
-        return {
-          name: cityName,
-          country: data.countryName || '',
-          admin1: data.principalSubdivision || ''
-        };
-      }
-    }
-  } catch {
-    // Try fallback
-  }
-
-  // 2. Secondary attempt with OpenStreetMap Nominatim
-  try {
-    const nomUrl = `${NOMINATIM_URL}?lat=${latitude}&lon=${longitude}&format=json&zoom=10&addressdetails=1`;
+    const nomUrl = `${NOMINATIM_URL}?lat=${latitude}&lon=${longitude}&format=json&zoom=13&addressdetails=1`;
     const response = await fetch(nomUrl, {
       headers: { 'Accept-Language': 'en' }
     });
     if (response.ok) {
       const data = await response.json();
       const addr = data.address || {};
-      const cityName = addr.city || addr.town || addr.village || addr.municipality || addr.county || addr.suburb || '';
-      if (cityName) {
+      const cityName = addr.city || addr.town || addr.village || addr.municipality || addr.hamlet || '';
+      const county = addr.county || '';
+      const state = addr.state || '';
+      const country = addr.country || '';
+
+      const finalName = cleanLocationName(cityName, addr.town || addr.city, county);
+      if (finalName && finalName !== 'Current Location') {
         return {
-          name: cityName,
-          country: addr.country || '',
-          admin1: addr.state || ''
+          name: finalName,
+          country: country,
+          admin1: state || county
+        };
+      }
+    }
+  } catch {
+    // Fallback to next provider
+  }
+
+  // 2. BigDataCloud lookup
+  try {
+    const bdcUrl = `${BIGDATACLOUD_URL}?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`;
+    const response = await fetch(bdcUrl);
+    if (response.ok) {
+      const data = await response.json();
+      const city = data.city || data.locality || '';
+      const county = data.localityInfo?.administrative?.find(a => a.adminLevel === 6)?.name || '';
+      const finalName = cleanLocationName(city, data.locality, county);
+
+      if (finalName && finalName !== 'Current Location') {
+        return {
+          name: finalName,
+          country: data.countryName || '',
+          admin1: data.principalSubdivision || county
         };
       }
     }
@@ -106,14 +146,14 @@ export async function reverseGeocode(latitude, longitude) {
   }
 
   return {
-    name: 'Current Location',
+    name: 'Local City',
     country: '',
     admin1: ''
   };
 }
 
 /**
- * Fetches current weather and 7-day daily forecast + full hourly data from Open-Meteo
+ * Fetches current weather, UV index, and 7-day daily forecast + full hourly data from Open-Meteo
  * @param {number} latitude 
  * @param {number} longitude 
  * @returns {Promise<Object>}
@@ -136,7 +176,8 @@ export async function fetchWeatherData(latitude, longitude) {
       'weather_code',
       'wind_speed_10m',
       'wind_direction_10m',
-      'surface_pressure'
+      'surface_pressure',
+      'uv_index'
     ].join(','),
     daily: [
       'weather_code',
@@ -156,7 +197,8 @@ export async function fetchWeatherData(latitude, longitude) {
       'apparent_temperature',
       'weather_code',
       'precipitation_probability',
-      'wind_speed_10m'
+      'wind_speed_10m',
+      'uv_index'
     ].join(','),
     timezone: 'auto',
     forecast_days: '7'
@@ -178,7 +220,7 @@ export async function fetchWeatherData(latitude, longitude) {
 }
 
 /**
- * Safely parses raw Open-Meteo API response with fallback logic and groups hourly data by day
+ * Safely parses raw Open-Meteo API response with fallback logic and computes UV statistics
  * @param {Object} data 
  * @returns {Object} Structured weather object
  */
@@ -190,21 +232,6 @@ export function parseWeatherData(data) {
   const current = data.current || {};
   const daily = data.daily || {};
   const hourly = data.hourly || {};
-
-  // Parse current conditions with safe defaults
-  const parsedCurrent = {
-    time: current.time || new Date().toISOString(),
-    temperature: typeof current.temperature_2m === 'number' ? current.temperature_2m : 0,
-    apparentTemperature: typeof current.apparent_temperature === 'number' ? current.apparent_temperature : (current.temperature_2m || 0),
-    relativeHumidity: typeof current.relative_humidity_2m === 'number' ? current.relative_humidity_2m : 0,
-    dewPoint: typeof current.dew_point_2m === 'number' ? current.dew_point_2m : ((current.temperature_2m || 0) - ((100 - (current.relative_humidity_2m || 0)) / 5)),
-    isDay: typeof current.is_day === 'number' ? Boolean(current.is_day) : true,
-    precipitation: typeof current.precipitation === 'number' ? current.precipitation : 0,
-    weatherCode: typeof current.weather_code === 'number' ? current.weather_code : 0,
-    windSpeed: typeof current.wind_speed_10m === 'number' ? current.wind_speed_10m : 0,
-    windDirection: typeof current.wind_direction_10m === 'number' ? current.wind_direction_10m : 0,
-    surfacePressure: typeof current.surface_pressure === 'number' ? current.surface_pressure : 1013
-  };
 
   // Group all hourly data by date key (YYYY-MM-DD)
   const hourlyByDay = {};
@@ -227,9 +254,33 @@ export function parseWeatherData(data) {
       precipitationProbability: Array.isArray(hourly.precipitation_probability) && typeof hourly.precipitation_probability[h] === 'number'
         ? hourly.precipitation_probability[h]
         : 0,
-      windSpeed: Array.isArray(hourly.wind_speed_10m) && typeof hourly.wind_speed_10m[h] === 'number' ? hourly.wind_speed_10m[h] : 0
+      windSpeed: Array.isArray(hourly.wind_speed_10m) && typeof hourly.wind_speed_10m[h] === 'number' ? hourly.wind_speed_10m[h] : 0,
+      uvIndex: Array.isArray(hourly.uv_index) && typeof hourly.uv_index[h] === 'number' ? hourly.uv_index[h] : 0
     });
   }
+
+  // Parse today's UV stats
+  const todayKey = (current.time || '').slice(0, 10);
+  const todayHourly = hourlyByDay[todayKey] || [];
+  const todayUvValues = todayHourly.map(h => h.uvIndex);
+  const todayUvStats = calculateUvStats(todayUvValues, typeof current.uv_index === 'number' ? current.uv_index : 0);
+
+  // Parse current conditions with safe defaults
+  const parsedCurrent = {
+    time: current.time || new Date().toISOString(),
+    temperature: typeof current.temperature_2m === 'number' ? current.temperature_2m : 0,
+    apparentTemperature: typeof current.apparent_temperature === 'number' ? current.apparent_temperature : (current.temperature_2m || 0),
+    relativeHumidity: typeof current.relative_humidity_2m === 'number' ? current.relative_humidity_2m : 0,
+    dewPoint: typeof current.dew_point_2m === 'number' ? current.dew_point_2m : ((current.temperature_2m || 0) - ((100 - (current.relative_humidity_2m || 0)) / 5)),
+    isDay: typeof current.is_day === 'number' ? Boolean(current.is_day) : true,
+    precipitation: typeof current.precipitation === 'number' ? current.precipitation : 0,
+    weatherCode: typeof current.weather_code === 'number' ? current.weather_code : 0,
+    windSpeed: typeof current.wind_speed_10m === 'number' ? current.wind_speed_10m : 0,
+    windDirection: typeof current.wind_direction_10m === 'number' ? current.wind_direction_10m : 0,
+    surfacePressure: typeof current.surface_pressure === 'number' ? current.surface_pressure : 1013,
+    uvIndex: typeof current.uv_index === 'number' ? current.uv_index : todayUvStats.high,
+    uvStats: todayUvStats
+  };
 
   // Parse 7-day daily forecast
   const parsedDaily = [];
@@ -238,6 +289,9 @@ export function parseWeatherData(data) {
   for (let i = 0; i < timeList.length; i++) {
     const dateStr = timeList[i];
     const dayHourly = hourlyByDay[dateStr] || [];
+    const dayUvValues = dayHourly.map(h => h.uvIndex);
+    const dayMaxUv = Array.isArray(daily.uv_index_max) && typeof daily.uv_index_max[i] === 'number' ? daily.uv_index_max[i] : 0;
+    const dayUvStats = calculateUvStats(dayUvValues, dayMaxUv);
 
     parsedDaily.push({
       date: dateStr,
@@ -250,13 +304,12 @@ export function parseWeatherData(data) {
       precipitationSum: Array.isArray(daily.precipitation_sum) && typeof daily.precipitation_sum[i] === 'number'
         ? daily.precipitation_sum[i]
         : 0,
-      uvIndexMax: Array.isArray(daily.uv_index_max) && typeof daily.uv_index_max[i] === 'number'
-        ? daily.uv_index_max[i]
-        : 0,
+      uvIndexMax: dayMaxUv,
+      uvStats: dayUvStats,
       sunrise: Array.isArray(daily.sunrise) ? daily.sunrise[i] : '',
       sunset: Array.isArray(daily.sunset) ? daily.sunset[i] : '',
       windSpeedMax: Array.isArray(daily.wind_speed_10m_max) && typeof daily.wind_speed_10m_max[i] === 'number' ? daily.wind_speed_10m_max[i] : 0,
-      hourly: dayHourly // Full 24 hours for this specific day
+      hourly: dayHourly
     });
   }
 

@@ -152,6 +152,21 @@ export class WeatherUI {
   }
 
   /**
+   * Helper to format time (sunrise / sunset)
+   * @param {string} isoString 
+   * @returns {string} e.g. "6:45 AM"
+   */
+  formatSunTime(isoString) {
+    if (!isoString) return '--';
+    try {
+      const d = new Date(isoString);
+      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch {
+      return '--';
+    }
+  }
+
+  /**
    * Renders the complete weather dashboard
    * @param {Object} location - { name, country, admin1 }
    * @param {Object} weatherData - parsed weather data
@@ -173,6 +188,7 @@ export class WeatherUI {
     const isToday = this.selectedDayIndex === 0;
     const activeDay = daily[this.selectedDayIndex] || daily[0] || {};
     const activeDayHourly = activeDay.hourly || [];
+    const uvStats = isToday ? current.uvStats : activeDay.uvStats;
 
     // Weather condition info for the displayed view
     const weatherInfo = isToday 
@@ -227,9 +243,9 @@ export class WeatherUI {
             </div>
           </div>
 
-          <!-- Secondary Metrics Grid -->
+          <!-- Primary Metrics Grid (Including UV Index with High/Med/Low) -->
           <div class="metrics-grid">
-            <!-- Humidity & Dew Point -->
+            <!-- 1. Humidity & Dew Point -->
             <div class="metric-card">
               <div class="metric-icon">${getWeatherIconSvg('droplets', 22)}</div>
               <div class="metric-info">
@@ -239,35 +255,58 @@ export class WeatherUI {
               </div>
             </div>
 
-            <!-- Wind Speed & Lettered Direction -->
+            <!-- 2. Wind Speed & Lettered Direction -->
             <div class="metric-card">
               <div class="metric-icon">${getWeatherIconSvg('wind', 22)}</div>
               <div class="metric-info">
                 <span class="metric-label">Wind</span>
                 <span class="metric-value">${formatWindSpeed(isToday ? current.windSpeed : (activeDay.windSpeedMax || 0), unit)}</span>
-                <span class="metric-sub">${isToday ? formatWindDirection(current.windDirection) : 'Max daily gust'}</span>
+                <span class="metric-sub">${isToday ? formatWindDirection(current.windDirection) : 'Peak daily gust'}</span>
               </div>
             </div>
 
-            <!-- Precipitation Chance & Sum -->
+            <!-- 3. Precipitation Chance & Sum -->
             <div class="metric-card">
               <div class="metric-icon">${getWeatherIconSvg('cloud-rain', 22)}</div>
               <div class="metric-info">
                 <span class="metric-label">Precipitation</span>
                 <span class="metric-value">${activeDay.precipitationProbability}%</span>
-                <span class="metric-sub">${activeDay.precipitationSum ? `${activeDay.precipitationSum} mm rain` : 'No rain expected'}</span>
+                <span class="metric-sub">${activeDay.precipitationSum ? `${activeDay.precipitationSum} mm rain` : '0 mm rain'}</span>
               </div>
             </div>
 
-            <!-- Barometric Surface Pressure (with unit conversion) -->
-            <div class="metric-card">
-              <div class="metric-icon">${getWeatherIconSvg('thermometer', 22)}</div>
+            <!-- 4. UV Index (High / Median / Low) -->
+            <div class="metric-card metric-card-uv">
+              <div class="metric-icon">${getWeatherIconSvg('uv-index', 22)}</div>
               <div class="metric-info">
-                <span class="metric-label">Pressure</span>
-                <span class="metric-value">${formatPressure(current.surfacePressure, unit)}</span>
-                <span class="metric-sub">UV Index: ${activeDay.uvIndexMax || 0}</span>
+                <span class="metric-label">UV Index</span>
+                <span class="metric-value">${uvStats.high} <span class="uv-badge uv-${uvStats.label.toLowerCase().replace(' ', '-')}">${uvStats.label}</span></span>
+                <span class="metric-sub">High: ${uvStats.high} • Med: ${uvStats.median} • Low: ${uvStats.low}</span>
               </div>
             </div>
+          </div>
+
+          <!-- Secondary Atmospheric Details Bar (Pressure & Sun Schedule) -->
+          <div class="atmospheric-bar">
+            <div class="atm-item">
+              <span class="atm-icon">${getWeatherIconSvg('gauge', 16)}</span>
+              <span class="atm-label">Pressure:</span>
+              <span class="atm-value">${formatPressure(current.surfacePressure, unit)}</span>
+            </div>
+            ${activeDay.sunrise ? `
+              <div class="atm-item">
+                <span class="atm-icon">${getWeatherIconSvg('sunrise', 16)}</span>
+                <span class="atm-label">Sunrise:</span>
+                <span class="atm-value">${this.formatSunTime(activeDay.sunrise)}</span>
+              </div>
+            ` : ''}
+            ${activeDay.sunset ? `
+              <div class="atm-item">
+                <span class="atm-icon">${getWeatherIconSvg('sunset', 16)}</span>
+                <span class="atm-label">Sunset:</span>
+                <span class="atm-value">${this.formatSunTime(activeDay.sunset)}</span>
+              </div>
+            ` : ''}
           </div>
         </section>
 
@@ -296,6 +335,9 @@ export class WeatherUI {
                   ${hour.precipitationProbability > 0 ? `
                     <span class="hourly-pop">💧${hour.precipitationProbability}%</span>
                   ` : `<span class="hourly-pop-empty">--</span>`}
+                  ${hour.uvIndex > 0 ? `
+                    <span class="hourly-uv" title="UV Index">☀️ UV ${Math.round(hour.uvIndex)}</span>
+                  ` : ''}
                 </div>
               `;
             }).join('') : `<p class="no-hourly">Hourly forecast unavailable for this day.</p>`}
@@ -344,7 +386,7 @@ export class WeatherUI {
       // Bind day click events
       const dayCards = this.weatherContent.querySelectorAll('.forecast-card');
       dayCards.forEach(card => {
-        card.addEventListener('click', (e) => {
+        card.addEventListener('click', () => {
           const index = parseInt(card.getAttribute('data-day-index'), 10);
           if (!isNaN(index)) {
             if (onDaySelect) {

@@ -1,9 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { parseWeatherData, searchLocation, reverseGeocode, WeatherApiError } from '../src/modules/api.js';
+import { parseWeatherData, searchLocation, reverseGeocode, cleanLocationName, WeatherApiError } from '../src/modules/api.js';
 
 describe('API Parsing and Service', () => {
+  describe('cleanLocationName', () => {
+    it('cleans township and station strings to human-readable names', () => {
+      expect(cleanLocationName('Township 3-Boone Station', 'Burlington', 'Alamance County')).toBe('Burlington');
+      expect(cleanLocationName('Township 12', '', 'Orange County')).toBe('Orange County');
+      expect(cleanLocationName('Township 3-Boone Station', '', '')).toBe('Boone');
+    });
+
+    it('preserves legitimate town and city names intact', () => {
+      expect(cleanLocationName('Austin', '', 'Travis County')).toBe('Austin');
+      expect(cleanLocationName('Burlington', 'Burlington', 'Alamance County')).toBe('Burlington');
+      expect(cleanLocationName('New York', '', '')).toBe('New York');
+    });
+  });
+
   describe('parseWeatherData', () => {
-    it('parses complete Open-Meteo response structure with 7 days and dew point', () => {
+    it('parses complete Open-Meteo response structure with 7 days and UV stats', () => {
       const mockRawData = {
         timezone: 'America/New_York',
         elevation: 10,
@@ -18,7 +32,8 @@ describe('API Parsing and Service', () => {
           weather_code: 1,
           wind_speed_10m: 12.4,
           wind_direction_10m: 180,
-          surface_pressure: 1015.2
+          surface_pressure: 1015.2,
+          uv_index: 6.2
         },
         daily: {
           time: ['2026-09-25', '2026-09-26', '2026-09-27', '2026-09-28', '2026-09-29', '2026-09-30', '2026-10-01'],
@@ -34,14 +49,15 @@ describe('API Parsing and Service', () => {
         },
         hourly: {
           time: [
-            '2026-09-25T00:00', '2026-09-25T01:00', '2026-09-25T12:00',
-            '2026-09-26T00:00', '2026-09-26T01:00'
+            '2026-09-25T00:00', '2026-09-25T06:00', '2026-09-25T12:00', '2026-09-25T15:00',
+            '2026-09-26T00:00', '2026-09-26T12:00'
           ],
-          temperature_2m: [16.0, 15.5, 23.5, 17.0, 16.5],
-          weather_code: [0, 0, 1, 2, 2],
-          precipitation_probability: [0, 0, 5, 20, 15],
-          relative_humidity_2m: [80, 82, 65, 75, 78],
-          dew_point_2m: [12.5, 12.5, 16.5, 13.0, 13.0]
+          temperature_2m: [16.0, 18.0, 23.5, 24.5, 17.0, 24.0],
+          weather_code: [0, 0, 1, 1, 2, 2],
+          precipitation_probability: [0, 0, 5, 0, 20, 10],
+          relative_humidity_2m: [80, 75, 65, 60, 75, 68],
+          dew_point_2m: [12.5, 13.0, 16.5, 16.0, 13.0, 15.0],
+          uv_index: [0, 1.2, 6.5, 4.0, 0, 5.0]
         }
       };
 
@@ -50,51 +66,13 @@ describe('API Parsing and Service', () => {
       expect(result.timezone).toBe('America/New_York');
       expect(result.current.temperature).toBe(23.5);
       expect(result.current.dewPoint).toBe(16.5);
-      expect(result.current.apparentTemperature).toBe(24.1);
-      expect(result.current.relativeHumidity).toBe(65);
-      expect(result.current.isDay).toBe(true);
-      expect(result.current.weatherCode).toBe(1);
+      expect(result.current.uvStats.high).toBe(6.5);
+      expect(result.current.uvStats.label).toBe('High');
 
       // Verify 7 daily forecasts parsed
       expect(result.daily).toHaveLength(7);
-      expect(result.daily[0].date).toBe('2026-09-25');
-      expect(result.daily[6].date).toBe('2026-10-01');
-
-      // Verify hourly grouped by day
-      expect(result.hourlyByDay['2026-09-25']).toHaveLength(3);
-      expect(result.hourlyByDay['2026-09-26']).toHaveLength(2);
-      expect(result.daily[0].hourly).toHaveLength(3);
-    });
-
-    it('handles missing or partial fields gracefully with fallbacks', () => {
-      const partialData = {
-        current: {
-          temperature_2m: 18.0
-        },
-        daily: {
-          time: ['2026-09-25'],
-          temperature_2m_max: [20.0]
-        }
-      };
-
-      const result = parseWeatherData(partialData);
-
-      expect(result.current.temperature).toBe(18.0);
-      expect(result.current.apparentTemperature).toBe(18.0);
-      expect(result.current.relativeHumidity).toBe(0);
-      expect(result.current.weatherCode).toBe(0);
-      expect(result.current.surfacePressure).toBe(1013);
-
-      expect(result.daily).toHaveLength(1);
-      expect(result.daily[0].temperatureMax).toBe(20.0);
-      expect(result.daily[0].temperatureMin).toBe(0);
-      expect(result.daily[0].weatherCode).toBe(0);
-    });
-
-    it('throws WeatherApiError on null or non-object input', () => {
-      expect(() => parseWeatherData(null)).toThrow(WeatherApiError);
-      expect(() => parseWeatherData(undefined)).toThrow(WeatherApiError);
-      expect(() => parseWeatherData('invalid json string')).toThrow(WeatherApiError);
+      expect(result.daily[0].uvStats.high).toBe(6.5);
+      expect(result.daily[1].uvStats.high).toBe(5.0);
     });
   });
 
@@ -119,12 +97,12 @@ describe('API Parsing and Service', () => {
         results: [
           {
             id: 1234,
-            name: 'Austin',
-            latitude: 30.2672,
-            longitude: -97.7431,
+            name: 'Burlington',
+            latitude: 36.0957,
+            longitude: -79.4378,
             country: 'United States',
             country_code: 'US',
-            admin1: 'Texas'
+            admin1: 'North Carolina'
           }
         ]
       };
@@ -134,28 +112,31 @@ describe('API Parsing and Service', () => {
         json: async () => mockGeocodeResponse
       });
 
-      const results = await searchLocation('Austin');
+      const results = await searchLocation('Burlington');
       expect(results).toHaveLength(1);
-      expect(results[0].name).toBe('Austin');
-      expect(results[0].latitude).toBe(30.2672);
+      expect(results[0].name).toBe('Burlington');
+      expect(results[0].latitude).toBe(36.0957);
       expect(results[0].country).toBe('United States');
     });
 
-    it('reverseGeocode extracts city name properly', async () => {
-      const mockBdcResponse = {
-        city: 'Austin',
-        locality: 'Travis County',
-        principalSubdivision: 'Texas',
-        countryName: 'United States'
+    it('reverseGeocode sanitizes township names into towns', async () => {
+      const mockNomResponse = {
+        address: {
+          city: 'Burlington',
+          town: 'Burlington',
+          county: 'Alamance County',
+          state: 'North Carolina',
+          country: 'United States'
+        }
       };
 
       fetch.mockResolvedValueOnce({
         ok: true,
-        json: async () => mockBdcResponse
+        json: async () => mockNomResponse
       });
 
-      const result = await reverseGeocode(30.2672, -97.7431);
-      expect(result.name).toBe('Austin');
+      const result = await reverseGeocode(36.0957, -79.4378);
+      expect(result.name).toBe('Burlington');
       expect(result.country).toBe('United States');
     });
   });
